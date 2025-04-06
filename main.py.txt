@@ -1,0 +1,734 @@
+# Project Structure for Apna Work
+
+"""
+apna_work/
+├── apna_work/                 # Main project folder
+│   ├── __init__.py
+│   ├── asgi.py
+│   ├── settings.py            # Project settings
+│   ├── urls.py                # Main URL routing
+│   ├── wsgi.py
+│   └── utils/                 # Utility functions
+│       ├── __init__.py
+│       └── geolocation.py     # Google Maps API helper functions
+│
+├── accounts/                  # User authentication app
+│   ├── __init__.py
+│   ├── admin.py
+│   ├── apps.py
+│   ├── forms.py               # User registration/login forms
+│   ├── models.py              # User profile models
+│   ├── tests.py
+│   ├── urls.py
+│   └── views.py               # Auth views
+│
+├── profiles/                  # User profiles app
+│   ├── __init__.py
+│   ├── admin.py
+│   ├── apps.py
+│   ├── forms.py               # Profile editing forms
+│   ├── models.py              # Extended profile models
+│   ├── tests.py
+│   ├── urls.py
+│   └── views.py               # Profile views
+│
+├── jobs/                      # Jobs posting app
+│   ├── __init__.py
+│   ├── admin.py
+│   ├── apps.py
+│   ├── forms.py               # Job posting forms
+│   ├── models.py              # Job and bid models
+│   ├── tests.py
+│   ├── urls.py
+│   └── views.py               # Job views
+│
+├── location/                  # Geolocation services app
+│   ├── __init__.py
+│   ├── admin.py
+│   ├── apps.py
+│   ├── forms.py
+│   ├── models.py              # Location models
+│   ├── tests.py
+│   ├── urls.py
+│   └── views.py               # Location API views
+│
+├── media/                     # User-uploaded content
+│   ├── portfolios/
+│   ├── profiles/
+│   └── videos/
+│
+├── static/                    # Static files
+│   ├── css/
+│   ├── js/
+│   │   └── maps.js            # Google Maps integration
+│   └── img/
+│
+└── templates/                 # HTML templates
+    ├── base.html              # Base template
+    ├── accounts/              # Auth templates
+    ├── profiles/              # Profile templates
+    ├── jobs/                  # Job templates
+    └── location/              # Map templates
+"""
+
+# settings.py
+# Key settings for the project
+
+"""
+# Google Maps API Configuration
+GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY')
+
+# Configure media uploads
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+# Custom user model
+AUTH_USER_MODEL = 'accounts.User'
+
+# App-specific settings
+INSTALLED_APPS = [
+    # Default Django apps
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    'django.contrib.gis',  # For GeoDjango functionality
+    
+    # Third-party apps
+    'rest_framework',
+    'rest_framework_gis',  # For geographic REST APIs
+    'crispy_forms',
+    'django_filters',
+    'storages',  # For file storage (videos, etc.)
+    
+    # Project apps
+    'accounts',
+    'profiles',
+    'jobs',
+    'location',
+]
+
+# For GeoDjango - spatial database support
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.contrib.gis.db.backends.postgis',
+        'NAME': os.environ.get('DB_NAME', 'apna_work'),
+        'USER': os.environ.get('DB_USER', 'postgres'),
+        'PASSWORD': os.environ.get('DB_PASSWORD', ''),
+        'HOST': os.environ.get('DB_HOST', 'localhost'),
+        'PORT': os.environ.get('DB_PORT', '5432'),
+    }
+}
+"""
+
+# accounts/models.py
+# User models for freelancers and clients
+
+"""
+from django.contrib.auth.models import AbstractUser
+from django.db import models
+from django.contrib.gis.db import models as gis_models
+from django.contrib.gis.geos import Point
+
+class User(AbstractUser):
+    USER_TYPE_CHOICES = (
+        ('freelancer', 'Freelancer'),
+        ('client', 'Client'),
+    )
+    
+    user_type = models.CharField(max_length=10, choices=USER_TYPE_CHOICES)
+    phone_number = models.CharField(max_length=15, blank=True)
+    date_of_birth = models.DateField(null=True, blank=True)
+    profile_picture = models.ImageField(upload_to='profiles/', null=True, blank=True)
+    
+    # Location fields
+    location = gis_models.PointField(geography=True, null=True, blank=True)
+    address = models.CharField(max_length=255, blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    state = models.CharField(max_length=100, blank=True)
+    country = models.CharField(max_length=100, blank=True)
+    pincode = models.CharField(max_length=10, blank=True)
+    
+    # For tracking
+    is_verified = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return self.username
+    
+    def set_location(self, latitude, longitude):
+        self.location = Point(longitude, latitude)
+        self.save()
+"""
+
+# profiles/models.py
+# Profile models for freelancers and clients
+
+"""
+from django.db import models
+from accounts.models import User
+
+class Skill(models.Model):
+    name = models.CharField(max_length=100)
+    category = models.CharField(max_length=100)
+    
+    def __str__(self):
+        return self.name
+
+class FreelancerProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='freelancer_profile')
+    bio = models.TextField(blank=True)
+    headline = models.CharField(max_length=255, blank=True)
+    skills = models.ManyToManyField(Skill, related_name='freelancers')
+    hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    
+    # Availability
+    is_available = models.BooleanField(default=True)
+    availability_hours = models.JSONField(null=True, blank=True)  # Store as JSON for flexibility
+    
+    # Fields for local work categories
+    provides_local_services = models.BooleanField(default=False)
+    travel_distance = models.IntegerField(help_text="Maximum distance willing to travel (in km)", null=True, blank=True)
+    
+    # Ratings and reviews
+    avg_rating = models.DecimalField(max_digits=3, decimal_places=2, default=0)
+    total_reviews = models.PositiveIntegerField(default=0)
+    
+    def __str__(self):
+        return f"{self.user.username}'s Freelancer Profile"
+
+class Portfolio(models.Model):
+    freelancer = models.ForeignKey(FreelancerProfile, on_delete=models.CASCADE, related_name='portfolio_items')
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    image = models.ImageField(upload_to='portfolios/images/', null=True, blank=True)
+    video = models.FileField(upload_to='portfolios/videos/', null=True, blank=True)
+    video_embed_url = models.URLField(blank=True, help_text="YouTube/Vimeo embed URL")
+    skills_used = models.ManyToManyField(Skill, related_name='portfolio_items')
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return self.title
+
+class ClientProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='client_profile')
+    company_name = models.CharField(max_length=255, blank=True)
+    company_website = models.URLField(blank=True)
+    industry = models.CharField(max_length=255, blank=True)
+    company_size = models.CharField(max_length=100, blank=True)
+    
+    def __str__(self):
+        return f"{self.user.username}'s Client Profile"
+"""
+
+# jobs/models.py
+# Job posting and bidding models
+
+"""
+from django.db import models
+from django.contrib.gis.db import models as gis_models
+from accounts.models import User
+from profiles.models import Skill
+
+class JobCategory(models.Model):
+    name = models.CharField(max_length=100)
+    is_local = models.BooleanField(default=False, help_text="Whether this category requires local presence")
+    icon = models.CharField(max_length=50, blank=True, help_text="Font Awesome icon class")
+    
+    def __str__(self):
+        return self.name
+
+class Job(models.Model):
+    STATUS_CHOICES = (
+        ('draft', 'Draft'),
+        ('open', 'Open'),
+        ('in_progress', 'In Progress'),
+        ('completed', 'Completed'),
+        ('cancelled', 'Cancelled'),
+    )
+    
+    JOB_TYPE_CHOICES = (
+        ('fixed', 'Fixed Price'),
+        ('hourly', 'Hourly Rate'),
+    )
+    
+    title = models.CharField(max_length=255)
+    client = models.ForeignKey(User, on_delete=models.CASCADE, related_name='posted_jobs')
+    category = models.ForeignKey(JobCategory, on_delete=models.SET_NULL, null=True, related_name='jobs')
+    description = models.TextField()
+    required_skills = models.ManyToManyField(Skill, related_name='required_for_jobs')
+    
+    # Job details
+    job_type = models.CharField(max_length=10, choices=JOB_TYPE_CHOICES, default='fixed')
+    budget = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    estimated_duration = models.CharField(max_length=100, blank=True)
+    deadline = models.DateField(null=True, blank=True)
+    
+    # Location information
+    is_remote = models.BooleanField(default=True)
+    location = gis_models.PointField(geography=True, null=True, blank=True)
+    address = models.CharField(max_length=255, blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    state = models.CharField(max_length=100, blank=True)
+    country = models.CharField(max_length=100, blank=True)
+    
+    # Status
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return self.title
+
+class Bid(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('accepted', 'Accepted'),
+        ('rejected', 'Rejected'),
+        ('withdrawn', 'Withdrawn'),
+    )
+    
+    job = models.ForeignKey(Job, on_delete=models.CASCADE, related_name='bids')
+    freelancer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='placed_bids')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    proposal = models.TextField()
+    estimated_completion_time = models.CharField(max_length=100, blank=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = ('job', 'freelancer')  # One bid per job per freelancer
+        
+    def __str__(self):
+        return f"Bid on {self.job.title} by {self.freelancer.username}"
+"""
+
+# location/models.py
+# Location models for the platform
+
+"""
+from django.db import models
+from django.contrib.gis.db import models as gis_models
+from django.contrib.gis.geos import Point
+from accounts.models import User
+
+class ServiceArea(models.Model):
+    freelancer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='service_areas')
+    name = models.CharField(max_length=100)
+    location = gis_models.PointField(geography=True)
+    radius = models.IntegerField(help_text="Service radius in kilometers")
+    
+    def __str__(self):
+        return f"{self.name} - {self.freelancer.username}"
+    
+    def set_location(self, latitude, longitude):
+        self.location = Point(longitude, latitude)
+        self.save()
+
+class SavedLocation(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='saved_locations')
+    name = models.CharField(max_length=100)
+    location = gis_models.PointField(geography=True)
+    address = models.CharField(max_length=255)
+    is_default = models.BooleanField(default=False)
+    
+    def __str__(self):
+        return f"{self.name} - {self.user.username}"
+    
+    def set_location(self, latitude, longitude):
+        self.location = Point(longitude, latitude)
+        self.save()
+"""
+
+# utils/geolocation.py
+# Utility functions for Google Maps API integration
+
+"""
+import requests
+from django.conf import settings
+from django.contrib.gis.geos import Point
+from django.contrib.gis.measure import D
+from django.contrib.gis.db.models.functions import Distance
+
+def geocode_address(address):
+    """Convert an address to latitude and longitude using Google Maps API"""
+    url = f"https://maps.googleapis.com/maps/api/geocode/json?address={address}&key={settings.GOOGLE_MAPS_API_KEY}"
+    response = requests.get(url)
+    data = response.json()
+    
+    if data['status'] == 'OK':
+        location = data['results'][0]['geometry']['location']
+        return {
+            'latitude': location['lat'],
+            'longitude': location['lng'],
+            'formatted_address': data['results'][0]['formatted_address']
+        }
+    return None
+
+def reverse_geocode(latitude, longitude):
+    """Convert latitude and longitude to address using Google Maps API"""
+    url = f"https://maps.googleapis.com/maps/api/geocode/json?latlng={latitude},{longitude}&key={settings.GOOGLE_MAPS_API_KEY}"
+    response = requests.get(url)
+    data = response.json()
+    
+    if data['status'] == 'OK':
+        return {
+            'formatted_address': data['results'][0]['formatted_address'],
+            'components': data['results'][0]['address_components']
+        }
+    return None
+
+def find_freelancers_near_location(point, distance_km=10, skills=None):
+    """Find freelancers near a specific location with optional skill filtering"""
+    from accounts.models import User
+    from profiles.models import FreelancerProfile
+    
+    # Base query: get freelancers within distance
+    queryset = User.objects.filter(
+        user_type='freelancer',
+        location__isnull=False,
+        is_verified=True,
+        freelancer_profile__is_available=True
+    ).annotate(
+        distance=Distance('location', point)
+    ).filter(
+        distance__lte=D(km=distance_km)
+    ).order_by('distance')
+    
+    # Filter by skills if provided
+    if skills:
+        queryset = queryset.filter(freelancer_profile__skills__in=skills).distinct()
+        
+    return queryset
+
+def find_jobs_near_location(point, distance_km=10, categories=None):
+    """Find jobs near a specific location with optional category filtering"""
+    from jobs.models import Job
+    
+    # Base query: get open jobs within distance
+    queryset = Job.objects.filter(
+        status='open',
+        location__isnull=False
+    ).annotate(
+        distance=Distance('location', point)
+    ).filter(
+        distance__lte=D(km=distance_km)
+    ).order_by('distance')
+    
+    # Filter by job categories if provided
+    if categories:
+        queryset = queryset.filter(category__in=categories)
+        
+    return queryset
+"""
+
+# views.py examples for key functionality
+
+"""
+# Example view for freelancer search using location
+from django.contrib.gis.geos import Point
+from django.shortcuts import render
+from django.views.generic import ListView
+from accounts.models import User
+from utils.geolocation import find_freelancers_near_location
+from profiles.models import Skill
+
+class NearbyFreelancersView(ListView):
+    model = User
+    template_name = 'location/nearby_freelancers.html'
+    context_object_name = 'freelancers'
+    paginate_by = 20
+    
+    def get_queryset(self):
+        latitude = float(self.request.GET.get('lat', 0))
+        longitude = float(self.request.GET.get('lng', 0))
+        distance = int(self.request.GET.get('distance', 10))
+        
+        skill_ids = self.request.GET.getlist('skills')
+        skills = Skill.objects.filter(id__in=skill_ids) if skill_ids else None
+        
+        location_point = Point(longitude, latitude)
+        return find_freelancers_near_location(location_point, distance, skills)
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['google_maps_api_key'] = settings.GOOGLE_MAPS_API_KEY
+        context['search_lat'] = self.request.GET.get('lat', 0)
+        context['search_lng'] = self.request.GET.get('lng', 0)
+        context['search_distance'] = self.request.GET.get('distance', 10)
+        
+        # Get all skills for filter form
+        context['all_skills'] = Skill.objects.all()
+        context['selected_skills'] = self.request.GET.getlist('skills')
+        
+        return context
+
+# Example view for job posting
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.urls import reverse_lazy
+from django.views.generic.edit import CreateView
+from jobs.models import Job, JobCategory
+from jobs.forms import JobPostForm
+
+class PostJobView(LoginRequiredMixin, CreateView):
+    model = Job
+    form_class = JobPostForm
+    template_name = 'jobs/post_job.html'
+    success_url = reverse_lazy('jobs:job_posted_success')
+    
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['user'] = self.request.user
+        return kwargs
+    
+    def form_valid(self, form):
+        form.instance.client = self.request.user
+        
+        # If job requires location, parse and save coordinates
+        if not form.instance.is_remote:
+            latitude = self.request.POST.get('latitude')
+            longitude = self.request.POST.get('longitude')
+            if latitude and longitude:
+                form.instance.set_location(float(latitude), float(longitude))
+        
+        return super().form_valid(form)
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['google_maps_api_key'] = settings.GOOGLE_MAPS_API_KEY
+        context['job_categories'] = JobCategory.objects.all()
+        return context
+"""
+
+# Example API endpoint implementation using Django REST Framework
+
+"""
+# location/api.py
+from rest_framework import viewsets, permissions
+from rest_framework_gis.filters import DistanceToPointFilter
+from django.contrib.gis.geos import Point
+from django.contrib.gis.measure import D
+from accounts.models import User
+from profiles.models import FreelancerProfile, Skill
+from .serializers import FreelancerLocationSerializer
+
+class NearbyFreelancersViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = FreelancerLocationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    distance_filter_field = 'location'
+    filter_backends = [DistanceToPointFilter]
+    
+    def get_queryset(self):
+        queryset = User.objects.filter(
+            user_type='freelancer',
+            location__isnull=False,
+            is_verified=True,
+            freelancer_profile__is_available=True
+        )
+        
+        # Filter by distance if provided
+        distance = self.request.query_params.get('distance', None)
+        if self.request.query_params.get('lat') and self.request.query_params.get('lng'):
+            lat = float(self.request.query_params.get('lat'))
+            lng = float(self.request.query_params.get('lng'))
+            point = Point(lng, lat, srid=4326)
+            
+            if distance:
+                queryset = queryset.filter(location__distance_lte=(point, D(km=int(distance))))
+        
+        # Filter by skills if provided
+        skills = self.request.query_params.getlist('skills')
+        if skills:
+            queryset = queryset.filter(freelancer_profile__skills__id__in=skills).distinct()
+            
+        # Filter by category type (local or digital)
+        category_type = self.request.query_params.get('category_type')
+        if category_type == 'local':
+            queryset = queryset.filter(freelancer_profile__provides_local_services=True)
+        
+        return queryset
+"""
+
+# Example templates
+
+"""
+# templates/location/nearby_freelancers.html
+
+{% extends 'base.html' %}
+
+{% block title %}Find Freelancers Near You{% endblock %}
+
+{% block extra_head %}
+<!-- Google Maps JavaScript API -->
+<script src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key }}&libraries=places"></script>
+<link rel="stylesheet" href="{% static 'css/map_styles.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1>Find Freelancers Near You</h1>
+    
+    <div class="row">
+        <!-- Left sidebar filters -->
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Filter Results</h5>
+                </div>
+                <div class="card-body">
+                    <form method="get" action="{% url 'location:nearby_freelancers' %}">
+                        <!-- Hidden location fields -->
+                        <input type="hidden" name="lat" id="lat" value="{{ search_lat }}">
+                        <input type="hidden" name="lng" id="lng" value="{{ search_lng }}">
+                        
+                        <!-- Location search -->
+                        <div class="form-group mb-3">
+                            <label for="location-search">Location</label>
+                            <input type="text" class="form-control" id="location-search" placeholder="Enter location">
+                        </div>
+                        
+                        <!-- Distance slider -->
+                        <div class="form-group mb-3">
+                            <label for="distance">Distance (km): <span id="distance-value">{{ search_distance }}</span></label>
+                            <input type="range" class="form-range" min="1" max="100" value="{{ search_distance }}" id="distance-slider" name="distance">
+                        </div>
+                        
+                        <!-- Skills filter -->
+                        <div class="form-group mb-3">
+                            <label>Skills</label>
+                            {% for skill in all_skills %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="skills" value="{{ skill.id }}" 
+                                       id="skill{{ skill.id }}" {% if skill.id|stringformat:"i" in selected_skills %}checked{% endif %}>
+                                <label class="form-check-label" for="skill{{ skill.id }}">
+                                    {{ skill.name }}
+                                </label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary">Apply Filters</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Main content area -->
+        <div class="col-md-9">
+            <!-- Map view -->
+            <div class="card mb-4">
+                <div class="card-body">
+                    <div id="map" style="height: 400px;"></div>
+                </div>
+            </div>
+            
+            <!-- Results list -->
+            <div class="row">
+                {% for freelancer in freelancers %}
+                <div class="col-md-6 mb-4">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <div class="d-flex">
+                                {% if freelancer.profile_picture %}
+                                <img src="{{ freelancer.profile_picture.url }}" alt="{{ freelancer.username }}" 
+                                     class="rounded-circle me-3" style="width: 64px; height: 64px; object-fit: cover;">
+                                {% else %}
+                                <div class="rounded-circle me-3 bg-secondary d-flex align-items-center justify-content-center" 
+                                     style="width: 64px; height: 64px; color: white;">
+                                    {{ freelancer.username|first|upper }}
+                                </div>
+                                {% endif %}
+                                
+                                <div>
+                                    <h5 class="card-title mb-1">{{ freelancer.get_full_name|default:freelancer.username }}</h5>
+                                    <p class="text-muted small mb-1">
+                                        {{ freelancer.freelancer_profile.headline|truncatechars:60 }}
+                                    </p>
+                                    <div class="mb-2">
+                                        <span class="badge bg-success me-1">{{ freelancer.distance.km|floatformat:1 }} km</span>
+                                        {% for skill in freelancer.freelancer_profile.skills.all|slice:":3" %}
+                                        <span class="badge bg-primary me-1">{{ skill.name }}</span>
+                                        {% endfor %}
+                                        {% if freelancer.freelancer_profile.skills.count > 3 %}
+                                        <span class="badge bg-secondary">+{{ freelancer.freelancer_profile.skills.count|add:"-3" }}</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <hr>
+                            
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <div class="stars">
+                                        {% for i in "12345" %}
+                                        <i class="fas fa-star {% if forloop.counter <= freelancer.freelancer_profile.avg_rating %}text-warning{% else %}text-muted{% endif %}"></i>
+                                        {% endfor %}
+                                        <span class="ms-1 small">({{ freelancer.freelancer_profile.total_reviews }})</span>
+                                    </div>
+                                </div>
+                                <a href="{% url 'profiles:freelancer_detail' freelancer.username %}" class="btn btn-sm btn-outline-primary">View Profile</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% empty %}
+                <div class="col-12">
+                    <div class="alert alert-info">
+                        No freelancers found with the current filters. Try adjusting your search criteria.
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            
+            <!-- Pagination -->
+            {% if is_paginated %}
+            <nav aria-label="Page navigation">
+                <ul class="pagination justify-content-center">
+                    {% if page_obj.has_previous %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page=1&lat={{ search_lat }}&lng={{ search_lng }}&distance={{ search_distance }}{% for skill_id in selected_skills %}&skills={{ skill_id }}{% endfor %}">&laquo; First</a>
+                    </li>
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}&lat={{ search_lat }}&lng={{ search_lng }}&distance={{ search_distance }}{% for skill_id in selected_skills %}&skills={{ skill_id }}{% endfor %}">Previous</a>
+                    </li>
+                    {% endif %}
+                    
+                    {% for num in page_obj.paginator.page_range %}
+                    {% if page_obj.number == num %}
+                    <li class="page-item active"><a class="page-link" href="#">{{ num }}</a></li>
+                    {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ num }}&lat={{ search_lat }}&lng={{ search_lng }}&distance={{ search_distance }}{% for skill_id in selected_skills %}&skills={{ skill_id }}{% endfor %}">{{ num }}</a>
+                    </li>
+                    {% endif %}
+                    {% endfor %}
+                    
+                    {% if page_obj.has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page_obj.next_page_number }}&lat={{ search_lat }}&lng={{ search_lng }}&distance={{ search_distance }}{% for skill_id in selected_skills %}&skills={{ skill_id }}{% endfor %}">Next</a>
+                    </li>
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&lat={{ search_lat }}&lng={{ search_lng }}&distance={{ search_distance }}{% for skill_id in selected_skills %}&skills={{ skill_id }}{% endfor %}">Last &raquo;</a>
+                    </li>
+                    {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{% static 'js/location_search.js' %}"></script>
+<script>
+    // Initialize the map and freelancer markers
+    function initMap() {
+        const mapCenter = { lat: {{ search_lat|default
